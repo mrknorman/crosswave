@@ -1,0 +1,14 @@
+universe = vanilla
+executable = ./create_run.py
+arguments = "--label MULTIDETECTOR2 --Nsignals 1e5 --detectors H1 L1 --nprocesses 32"
+request_memory = 64 GB
+request_disk = 512 MB
+request_cpus = 32
+getenv = True
+log = log.log
+error = err.err
+output = out.out
+accounting_group = ligo.sim.o3.cbc.bbh.pycbcoffline
+accounting_group_user = philip.relton
+notification = never
+queue
