@@ -1,3 +1,6 @@
+from pathlib import Path
+import sys
+
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import os
@@ -19,94 +22,7 @@ parent_dir = current_dir.parent.parent.parent
 sys.path.append(str(parent_dir))
 
 import gravyflow as gf
-
-def get_element_shape(dataset):
-    for element in dataset:
-        return element['H1_strain'].shape[1:]
-
-def setup_CUDA(verbose, device_num):
-        
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(device_num)
-        
-    gpus =  tf.config.list_logical_devices('GPU')
-    strategy = tf.distribute.MirroredStrategy(gpus)
-
-    physical_devices = tf.config.list_physical_devices('GPU')
-    
-    for device in physical_devices:    
-
-        try:
-            tf.config.experimental.set_memory_growth(device, True)
-        except:
-            # Invalid device or cannot modify virtual devices once initialized.
-            pass
-    
-    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-
-    if verbose:
-        tf.config.list_physical_devices("GPU")
-        
-    return strategy
-
-class PositionalEncoding(Layer):
-    def __init__(self, max_len=4096, d_model=128, **kwargs):
-        super(PositionalEncoding, self).__init__(**kwargs)
-        self.max_len = max_len
-        self.d_model = d_model
-        self.pe = self.create_positional_encoding()
-
-    def create_positional_encoding(self):
-        position = tf.range(self.max_len, dtype=tf.float16)[:, tf.newaxis]
-        div_term = tf.exp(tf.range(0, self.d_model, 2, dtype=tf.float16) * -(tf.math.log(10000.0) / self.d_model))
-
-        sin_values = tf.sin(position * div_term)
-        cos_values = tf.cos(position * div_term)
-
-        sin_values_expanded = tf.expand_dims(sin_values, 1)
-        cos_values_expanded = tf.expand_dims(cos_values, 1)
-
-        pe = tf.concat([sin_values_expanded, cos_values_expanded], axis=1)
-        pe = tf.reshape(pe, (1, self.max_len, self.d_model))
-
-        return tf.cast(pe, dtype=tf.float16)
-
-    def call(self, x):
-        return x + self.pe[:, :tf.shape(x)[1], :]
-
-def create_denoising_layers():
-    inputs = Input(shape=(16384, 1))
-    x = Conv1D(8, 3, padding='same')(inputs)
-    x = ReLU()(x)
-    x = MaxPooling1D(2)(x)
-    x = Conv1D(16, 3, padding='same')(x)
-    x = ReLU()(x)
-    x = MaxPooling1D(2)(x)
-    x = Conv1DTranspose(8, 3, strides=2, padding='same')(x)
-    x = ReLU()(x)
-    x = Conv1DTranspose(1, 3, strides=2, padding='same')(x)
-    x = ReLU()(x)
-    return Model(inputs=inputs, outputs=x)
-
-def transformer_encoder(input_1, input_2, head_size, num_heads, ff_dim, dropout=0):
-    # Normalization and Attention
-    x = layers.LayerNormalization(epsilon=1e-6)(input_1)
-    y = layers.LayerNormalization(epsilon=1e-6)(input_2)
-    
-    x = layers.MultiHeadAttention(
-        key_dim=head_size, num_heads=num_heads, dropout=dropout
-    )(x, y)
-    x = layers.Dropout(dropout)(x)
-    res = x + input_1
-
-    # Feed Forward Part
-    x = layers.LayerNormalization(epsilon=1e-6)(res)
-    # Conv1D(filters=ff_dim, kernel_size=1, activation="relu")
-    x = layers.Dense(ff_dim, activation="relu")(x)
-    x = layers.Dropout(dropout)(x)
-    # Conv1D((filters=inputs.shape[-1], kernel_size=1))
-    x = layers.Dense(input_1.shape[-1])(x)
-    x = layers.Dropout(dropout)(x)
-    return x + res
+from layers import PositionalEncoding, create_denoising_layers, AttentionBlock
 
 def build_crosswave(input_shape, config):
     inputs = Input(shape=input_shape)
@@ -125,41 +41,37 @@ def build_crosswave(input_shape, config):
         MaxPooling1D(pool_size=8, strides=8),
         Conv1D(filters=16, kernel_size=8, padding='valid', activation='relu'),
         Conv1D(filters=16, kernel_size=8, padding='valid', activation='relu'),
-        Conv1D(filters=int(128), kernel_size=8, padding='valid', activation='relu')
+        Conv1D(filters=128, kernel_size=8, padding='valid', activation='relu')
     ])
 
     features_livingston = feature_extraction(x_livingston)
     features_hanford = feature_extraction(x_hanford)
 
-    positional_encoding = PositionalEncoding()
-
-    embedded_livingston = positional_encoding(features_livingston)
-    embedded_hanford = positional_encoding(features_hanford)
-
-    num_transformer_blocks = 3
-    combined = Concatenate(axis=2)([features_livingston, features_hanford])
+    embedded_livingston = PositionalEncoding()(features_livingston)
+    embedded_hanford = PositionalEncoding()(features_hanford)
     
     s_livingston = embedded_livingston 
     s_hanford = embedded_hanford
 
+    num_transformer_blocks = 3
     head_size = 128
     num_heads = 8
     dropout = 0.5
     ff_dim = 128
+
     for _ in range(num_transformer_blocks):
         
-        s_livingston = transformer_encoder(s_livingston, s_livingston, head_size, num_heads, ff_dim, dropout=dropout)
-        s_hanford    = transformer_encoder(s_hanford, s_hanford, head_size, num_heads, ff_dim, dropout=dropout)
+        s_livingston = AttentionBlock(head_size, num_heads, ff_dim, dropout=dropout)(s_livingston)
+        s_hanford    = AttentionBlock(head_size, num_heads, ff_dim, dropout=dropout)(s_hanford)
         
-        x_livingston = transformer_encoder(s_livingston, s_hanford, head_size, num_heads, ff_dim, dropout=dropout)
-        x_hanford    = transformer_encoder(s_hanford, s_livingston, head_size, num_heads, ff_dim, dropout=dropout)
+        x_livingston = AttentionBlock(head_size, num_heads, ff_dim, dropout=dropout)([s_livingston, s_hanford])
+        x_hanford    = AttentionBlock(head_size, num_heads, ff_dim, dropout=dropout)([s_hanford, s_livingston])
         
         s_livingston += x_livingston
         s_hanford    += x_hanford
         
     mult = Concatenate(axis=2)([s_livingston, s_hanford])
     
-    #x = tf.squeeze(x_cross_attention, axis=1)
     x = GlobalAveragePooling1D()(mult)
     x = Dense(512, activation='relu')(x)
     x = layers.Dropout(dropout)(x)
@@ -169,8 +81,6 @@ def build_crosswave(input_shape, config):
 
 def getInput(element):
     return (tf.transpose(tf.stack([element['H1_strain'], element['L1_strain']], axis=1), perm=[0, 2, 1]), tf.cast(element['overlap_present'], tf.float16))
-
-strategy = setup_CUDA(True, "1,2,3,5,6")
 
 training_config = dict(
     learning_rate=1e-4,
@@ -238,7 +148,7 @@ with gf.env():
         validation_data=test_dataset.map(extract, num_parallel_calls=tf.data.AUTOTUNE),
         epochs=training_config["epochs"],
         batch_size=training_config["batch_size"],
-        # verbose=2,
+        verbose=2,
         callbacks=callbacks
     )
 
