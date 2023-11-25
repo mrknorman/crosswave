@@ -15,7 +15,6 @@ def get_element_shape(dataset):
         return element['H1_strain'].shape[1:]
 
 def setup_CUDA(verbose, device_num):
-        
     os.environ["CUDA_VISIBLE_DEVICES"] = str(device_num)
         
     gpus =  tf.config.list_logical_devices('GPU')
@@ -92,6 +91,18 @@ def build_cnn_regression(
 @tf.function
 def __regresionFilter(dataset):
     return dataset['overlap_present'] == 1
+
+def timesToOneHot(times, array_len, duration):
+    timeA = times[0]
+    timeB = times[1]
+    
+    A_index = tf.squeeze(tf.cast(array_len/duration * timeA, tf.int32))
+    B_index = tf.squeeze(tf.cast(array_len/duration * timeB, tf.int32))
+        
+    return multi_hot(A_index, B_index, array_len)
+
+def getInputRegression(element):
+    return (element['H1_strain'], timesToOneHot((element['H1_time_signal_a'], element['H1_time_signal_b']), 16_384, 16))
 
 strategy = setup_CUDA(True, "1,2,3")
 
