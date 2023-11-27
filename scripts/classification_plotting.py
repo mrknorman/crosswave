@@ -7,7 +7,7 @@ import pandas as pd
 
 from bokeh.plotting import figure, save
 from bokeh.layouts import gridplot, layout
-from bokeh.models import ColumnDataSource, Select
+from bokeh.models import ColumnDataSource, Select, Range1d, LinearAxis, CustomJSTickFormatter
 from bokeh.resources import CDN
 from bokeh.embed import file_html
 
@@ -153,7 +153,196 @@ def plot_regression_scores(
     bk.output_file(f"{output_file_name}_B.html")
     bk.save(figure_b_time)
 
+def difference_plot(
+        input_file_name : str = "./validation_results/validation_scores_regression",
+        output_file_name: str = "./validation_results/validation_scores_regression",
+    ):
+
+    # Load dataframe:
+    data = pd.read_pickle(f"{input_file_name}.pkl")
+
+    data['H1_time_signal_a_'] -= 10
+    data['H1_time_signal_b_'] -= 10
+
+    data['results_A'] -= 10
+    data['results_B'] -= 10
+
+    data['Error Signal Time A'] = (data['H1_time_signal_a_'] - data['results_A']).abs()
+    data['Error Signal Time B'] = (data['H1_time_signal_b_'] - data['results_B']).abs()
+    data["Time Differnece"] = (data['H1_time_signal_b_'] - data['H1_time_signal_a_']).abs() 
+
+    # Create a figure
+    p = figure(x_axis_label='Arrival Time Difference (s)', y_axis_label='Prediction Error (s)')
+
+    # Finding the maximum absolute value for y-axis range
+    max_range = max(data['Error Signal Time A'].abs().max(), data['Error Signal Time B'].abs().max())
+
+    # Setting the y-axis range to be symmetric around zero
+    p.y_range = Range1d(-max_range, max_range)
+
+    # Adding lines to the plot
+    p.circle(data['Time Differnece'], data['Error Signal Time A'], legend_label="Error Signal Time A", color="blue")
+    p.circle(data['Time Differnece'], -data['Error Signal Time B'], legend_label="Error Signal Time B", color="red")  # Inverting B
+
+    # Custom tick formatter to display absolute values
+    p.yaxis.formatter = CustomJSTickFormatter(code="""
+        return Math.abs(tick).toString();
+    """)
+
+    # Set output file:
+    bk.output_file(f"difference_plot.html")
+    bk.save(p)
+
+def difference_plot_best(
+        input_file_name : str = "./validation_results/crosswave_validation_scores_regression_best",
+    ):
+    
+    # Load dataframe:
+    data = pd.read_pickle(f"{input_file_name}.pkl")
+
+    data['H1_time_signal_a'] -= 60
+    data['H1_time_signal_b'] -= 60 
+
+    data['H1_time_signal_a_pred'] *= 4
+    data['H1_time_signal_b_pred'] *= 4
+
+    data['Error Signal Time A'] = (data['H1_time_signal_a'] - data['H1_time_signal_a_pred']).abs()
+    data['Error Signal Time B'] = (data['H1_time_signal_b'] - data['H1_time_signal_b_pred']).abs()
+    data["Time Differnece"] = (data['H1_time_signal_b'] - data['H1_time_signal_a']).abs()
+
+    # Create a figure
+    p = figure(x_axis_label='Arrival Time Difference (s)', y_axis_label='Prediction Error (s)')
+
+    # Finding the maximum absolute value for y-axis range
+    max_range = max(data['Error Signal Time A'].abs().max(), data['Error Signal Time B'].abs().max())
+
+    # Setting the y-axis range to be symmetric around zero
+    p.y_range = Range1d(-max_range, max_range)
+
+    # Adding lines to the plot
+    p.circle(data['Time Differnece'], data['Error Signal Time A'], legend_label="Error Signal Time A", color="blue")
+    p.circle(data['Time Differnece'], -data['Error Signal Time B'], legend_label="Error Signal Time B", color="red")  # Inverting B
+
+    # Custom tick formatter to display absolute values
+    p.yaxis.formatter = CustomJSTickFormatter(code="""
+        return Math.abs(tick).toString();
+    """)
+
+    # Set output file:
+    bk.output_file(f"difference_plot_best.html")
+    bk.save(p)
+
+def difference_plot_best_difference(
+        input_file_name : str = "./validation_results/crosswave_validation_scores_regression_best",
+    ):
+    
+    # Load dataframe:
+    data = pd.read_pickle(f"{input_file_name}.pkl")
+
+    data['H1_time_signal_a'] -= 60
+    data['H1_time_signal_b'] -= 60 
+
+    data['H1_time_signal_a_pred'] *= 4
+    data['H1_time_signal_b_pred'] *= 4
+
+    data['Error Signal Time A'] = (data['H1_time_signal_a'] - data['H1_time_signal_a_pred']).abs()
+    data['Error Signal Time B'] = (data['H1_time_signal_b'] - data['H1_time_signal_b_pred']).abs()
+    data["Time Difference"] = (data['H1_time_signal_b'] - data['H1_time_signal_a']).abs()
+    data["Predicted Time Difference"] = (data['H1_time_signal_a_pred'] - data['H1_time_signal_b_pred']).abs()
+
+    # Create a figure
+    p = figure(x_axis_label='Arrival Time Difference (s)', y_axis_label='Predicted Time Difference (s)')
+
+    # Finding the maximum absolute value for y-axis range
+    max_range = max(data['Error Signal Time A'].abs().max(), data['Error Signal Time B'].abs().max())
+
+    # Setting the y-axis range to be symmetric around zero
+    p.y_range = Range1d(0, max_range)
+
+    # Adding lines to the plot
+    p.circle(data['Time Difference'], data["Predicted Time Difference"], color="blue")
+
+    # Set output file:
+    bk.output_file(f"difference_plot_best_difference.html")
+    bk.save(p)
+
+def difference_plot_best_difference_error(
+        input_file_name : str = "./validation_results/crosswave_validation_scores_regression_best",
+    ):
+    
+    # Load dataframe:
+    data = pd.read_pickle(f"{input_file_name}.pkl")
+
+    data['H1_time_signal_a'] -= 60
+    data['H1_time_signal_b'] -= 60 
+
+    data['H1_time_signal_a_pred'] *= 4
+    data['H1_time_signal_b_pred'] *= 4
+
+    data['Error Signal Time A'] = (data['H1_time_signal_a'] - data['H1_time_signal_a_pred']).abs()
+    data['Error Signal Time B'] = (data['H1_time_signal_b'] - data['H1_time_signal_b_pred']).abs()
+    data["Time Difference"] = (data['H1_time_signal_b'] - data['H1_time_signal_a']).abs()
+    data["Predicted Time Difference"] = (data['H1_time_signal_a_pred'] - data['H1_time_signal_b_pred']).abs()
+
+    # Create a figure
+    p = figure(x_axis_label='Arrival Time Difference (s)', y_axis_label='Predicted Time Difference Error (s)')
+
+    # Finding the maximum absolute value for y-axis range
+    max_range = max(data['Error Signal Time A'].abs().max(), data['Error Signal Time B'].abs().max())
+
+    # Setting the y-axis range to be symmetric around zero
+    p.y_range = Range1d(0, max_range)
+
+    # Adding lines to the plot
+    p.circle(data['Time Difference'], (data["Time Difference"] - data["Predicted Time Difference"]).abs(), color="blue")
+
+    # Set output file:
+    bk.output_file(f"difference_plot_best_difference_error.html")
+    bk.save(p)
+
+def difference_plot_best_difference_snr(
+        input_file_name : str = "./validation_results/crosswave_validation_scores_regression_best",
+    ):
+    
+    # Load dataframe:
+    data = pd.read_pickle(f"{input_file_name}.pkl")
+
+    data['H1_time_signal_a'] -= 60
+    data['H1_time_signal_b'] -= 60 
+
+    data['H1_time_signal_a_pred'] *= 4
+    data['H1_time_signal_b_pred'] *= 4
+
+    data['Error Signal Time A'] = (data['H1_time_signal_a'] - data['H1_time_signal_a_pred']).abs()
+    data['Error Signal Time B'] = (data['H1_time_signal_b'] - data['H1_time_signal_b_pred']).abs()
+    data["Time Difference"] = (data['H1_time_signal_b'] - data['H1_time_signal_a']).abs()
+    data["Predicted Time Difference"] = (data['H1_time_signal_a_pred'] - data['H1_time_signal_b_pred']).abs()
+
+    # Create a figure
+    p = figure(x_axis_label='Optimal SNR Signal B', y_axis_label='Predicted Time Difference Error (s)')
+
+    # Finding the maximum absolute value for y-axis range
+    max_range = max(data['Error Signal Time A'].abs().max(), data['Error Signal Time B'].abs().max())
+
+    # Setting the y-axis range to be symmetric around zero
+    p.y_range = Range1d(0, max_range)
+
+    data["Network SNR Signal B"] = np.sqrt(data["H1_SNR_signal_b"]**2 + data["L1_SNR_signal_b"]**2)
+
+
+    # Adding lines to the plot
+    p.circle(data["Network SNR Signal B"], (data["Time Difference"] - data["Predicted Time Difference"]).abs(), legend_label="Error Signal Time A", color="blue")
+
+    # Set output file:
+    bk.output_file(f"difference_plot_best_difference_snr.html")
+    bk.save(p)
+
 if __name__ == "__main__":
+    difference_plot()
+    difference_plot_best()
+    difference_plot_best_difference()
+    difference_plot_best_difference_error()
+    difference_plot_best_difference_snr()
     plot_classification_scores()
     plot_regression_scores()
 
