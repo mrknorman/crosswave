@@ -8,31 +8,12 @@ import pandas as pd
 from bokeh.plotting import figure, save
 from bokeh.layouts import gridplot, layout
 from bokeh.models import ColumnDataSource, Select, Range1d, LinearAxis, CustomJSTickFormatter
+from bokeh.models import ColumnDataSource, Select, CustomJS, LinearColorMapper, ColorBar
 from bokeh.resources import CDN
 from bokeh.embed import file_html
 
 import pandas as pd
 import numpy as np
-
-def reorder(data):
-    data = data.sort_values(by='original_index')
-    preseverd_cols = data[["model_prediction", "overlap_present"]]
-    preseverd_cols = preseverd_cols.reset_index(drop=True)
-
-    columns_a = [col for col in data.columns if col.endswith('_a')]
-    columns_a_data = data[columns_a][:10000]
-    a_doubled = pd.concat([columns_a_data, columns_a_data], ignore_index=True)
-
-    columns_b_data = data[columns_a][10000:20000]
-    b_doubled = pd.concat([columns_b_data, columns_b_data], ignore_index=True)
-    b_doubled = b_doubled.rename(columns={col: col.replace('_a', '_b') for col in b_doubled.columns})
-
-    new_doubles = a_doubled.join(b_doubled)
-    new_doubles = new_doubles.join(preseverd_cols[20000:].reset_index(drop=True))
-    
-    data = pd.concat([data[:20000], new_doubles])
-    
-    return data
 
 def reorder(data):
     data = data.sort_values(by='original_index')
@@ -395,21 +376,128 @@ def plot_classification_efficiencies(
 
     # Specify the name of the output file and save the plot
     save(p)
+
+def plot_regression_efficiencies(
+        input_file_name : str = "./validation_results/crosswave_validation_scores_regression_best",
+        output_file_name : str = "./validation_results/validation_scores_regression_efficiency",
+        rolling_window_size: int = 1000, # You can adjust the window size as needed
+        nth_value: int = 100  # Plot every nth value
+    ):
+    
+    # Load dataframe:
+    data = pd.read_pickle(f"{input_file_name}.pkl")
+
+    data['H1_time_signal_a_pred'] *= 4
+    data['H1_time_signal_b_pred'] *= 4
+    data['H1_time_signal_a'] -= 60
+    data['H1_time_signal_b'] -= 60 
+
+    df = data[data['H1_time_signal_b'] > 0].copy()
+
+    df['Error Signal Time A'] = (df['H1_time_signal_a'] - df['H1_time_signal_a_pred']).abs()
+    df['Error Signal Time B'] = (df['H1_time_signal_b'] - df['H1_time_signal_b_pred']).abs()
+    
+    df["Network SNR Signal A"] = np.sqrt(df["H1_SNR_signal_a"]**2 + df["L1_SNR_signal_a"]**2)
+    df["Network SNR Signal B"] = np.sqrt(df["H1_SNR_signal_b"]**2 + df["L1_SNR_signal_b"]**2)
+    
+    # Calculate the minimum Network SNR
+    df["Minimum Network SNR"] = np.minimum(df["Network SNR Signal A"], df["Network SNR Signal B"])
+    df["Maximum Network SNR"] = np.maximum(df["Network SNR Signal A"], df["Network SNR Signal B"])
+    
+    for error_signal, name in zip(['Error Signal Time A', 'Error Signal Time B'], ["A", "B"]):
+
+        # Set output file:
+        bk.output_file(f"{output_file_name}_{name}.html")
+
+        min_snr = 150
+        
+        # Create a new plot with a title and axis labels
+        p = figure(
+            x_axis_label='Network SNR',
+            y_axis_label=f'Rolling Average Signal {name} Merger Time Error (s)',
+            width = 800
+        )
+
+        # Filter for Minimum Network SNR < 30 and Sort by Minimum Network SNR
+        df = df[df["Minimum Network SNR"] < min_snr].sort_values(by="Minimum Network SNR")
+        df["Rolling Average Prediction Error (s)"] = df[error_signal].rolling(window=rolling_window_size).mean()
+        # Select every nth value
+        df_nth = df.iloc[::nth_value, :]
+        # Add a scatter renderer with a size, color, and alpha for the rolling average
+        p.line(
+            df_nth['Minimum Network SNR'], 
+            df_nth['Rolling Average Prediction Error (s)'], 
+            width=2, 
+            color=palettes.Bright[7][0],
+            legend_label="Minimum Signal SNR vs Model Prediction"
+        )
+        
+        df = df[df["Maximum Network SNR"] < min_snr].sort_values(by="Maximum Network SNR")
+        df["Rolling Average Prediction Error (s)"] = df[error_signal].rolling(window=rolling_window_size).mean()
+
+        df_nth = df.iloc[::nth_value, :]
+        p.line(
+            df_nth['Maximum Network SNR'], 
+            df_nth['Rolling Average Prediction Error (s)'], 
+            width=2, 
+            color=palettes.Bright[7][3],
+            legend_label="Maximum Signal SNR vs Model Prediction"
+        )
+        
+        df = df[df["Network SNR Signal A"] < min_snr].sort_values(by="Network SNR Signal A")
+        df["Rolling Average Prediction Error (s)"] = df[error_signal].rolling(window=rolling_window_size).mean()
+
+        df_nth = df.iloc[::nth_value, :]
+        p.line(
+            df_nth['Network SNR Signal A'], 
+            df_nth['Rolling Average Prediction Error (s)'], 
+            width=2, 
+            color=palettes.Bright[7][1],
+            legend_label="Signal A SNR vs Model Prediction"
+        )
+        
+        df = df[df["Network SNR Signal B"] < min_snr].sort_values(by="Network SNR Signal B")
+        df["Rolling Average Prediction Error (s)"] = df[error_signal].rolling(window=rolling_window_size).mean()
+        df_nth = df.iloc[::nth_value, :]
+        p.line(
+            df_nth['Network SNR Signal B'], 
+            df_nth['Rolling Average Prediction Error (s)'], 
+            width=2, 
+            color=palettes.Bright[7][2],
+            legend_label="Signal B SNR vs Model Prediction"
+        )
+        
+        p.legend.title = 'Legend'
+        p.legend.location = "center_right"
+        p.legend.margin = 5
+
+        # Specify the name of the output file and save the plot
+        save(p)
     
 def plot_regression_scores(
-        input_file_name : str = "./validation_results/validation_scores_regression",
+        input_file_name : str = "./validation_results/crosswave_validation_scores_regression_best",
         output_file_name : str = "./validation_results/validation_scores_regression"
     ):
 
     # Load dataframe:
     data = pd.read_pickle(f"{input_file_name}.pkl")
 
-    data['Error Signal Time A'] = (data['H1_time_signal_a_'] - data['results_A']).abs()
-    data['Error Signal Time B'] = (data['H1_time_signal_b_'] - data['results_B']).abs()
+    data['H1_time_signal_a_pred'] *= 4
+    data['H1_time_signal_b_pred'] *= 4
+    data['H1_time_signal_a'] -= 60
+    data['H1_time_signal_b'] -= 60 
+
+    data = data[data['H1_time_signal_b'] > 0]
+
+    data['Error Signal Time A'] = data['H1_time_signal_a'] - data['H1_time_signal_a_pred']
+    data['Error Signal Time B'] = data['H1_time_signal_b'] - data['H1_time_signal_b_pred']
+
+    data = data[data['Error Signal Time A'] < 0.25]
+    data = data[data['Error Signal Time B'] < 0.25]
 
     data["Network SNR Signal A"] = np.sqrt(data["H1_SNR_signal_a"]**2 + data["L1_SNR_signal_a"]**2)
     data["Network SNR Signal B"] = np.sqrt(data["H1_SNR_signal_b"]**2 + data["L1_SNR_signal_b"]**2)
-
+    
     x_axis = "Network SNR Signal A"
     y_axis = "Network SNR Signal B"
 
@@ -421,7 +509,10 @@ def plot_regression_scores(
     pallet = palettes.Plasma[11]
 
     common_low = 0.0
-    common_high = max(max(data["Error Signal Time A"]), min(data["Error Signal Time A"]))
+    common_high = max(
+        max(data["Error Signal Time A"]), 
+        min(data["Error Signal Time A"])
+    )
 
     mapper = linear_cmap(
         field_name="Error Signal Time A", 
@@ -485,44 +576,63 @@ def plot_regression_scores(
     bk.save(figure_b_time)
 
 def difference_plot(
-        input_file_name : str = "./validation_results/validation_scores_regression",
-        output_file_name: str = "./validation_results/validation_scores_regression",
+        input_file_name : str = "./validation_results/crosswave_validation_scores_regression_best",
+        output_file_name: str = "./validation_results/crosswave_validation_scores_regression_best",
+        rolling_window_size=500
     ):
 
-    # Load dataframe:
+    #Load dataframe:
     data = pd.read_pickle(f"{input_file_name}.pkl")
+    
+    data['H1_time_signal_a_pred'] *= 4
+    data['H1_time_signal_b_pred'] *= 4
+    data['H1_time_signal_a'] -= 60
+    data['H1_time_signal_b'] -= 60 
 
-    data['H1_time_signal_a_'] -= 10
-    data['H1_time_signal_b_'] -= 10
+    data = data[data["H1_time_signal_b"] > 0]
+    data = data[data["H1_time_signal_b_pred"] > 0]
 
-    data['results_A'] -= 10
-    data['results_B'] -= 10
+    data['Error Signal Time A'] = data['H1_time_signal_a_pred'] - data['H1_time_signal_a']
+    data['Error Signal Time B'] = data['H1_time_signal_b_pred'] - data['H1_time_signal_b']
+    data["Time Difference"] = data['H1_time_signal_a'] - data['H1_time_signal_b']
 
-    data['Error Signal Time A'] = (data['H1_time_signal_a_'] - data['results_A']).abs()
-    data['Error Signal Time B'] = (data['H1_time_signal_b_'] - data['results_B']).abs()
-    data["Time Differnece"] = (data['H1_time_signal_b_'] - data['H1_time_signal_a_']).abs() 
+    for error_signal, title in zip(['Error Signal Time A', 'Error Signal Time B'], ['A', 'B']):
+        # Sort data based on 'Time Difference' for meaningful rolling average
+        sorted_data = data.sort_values(by='Time Difference')
+        
+        sorted_data[f"abs_{error_signal}"] = sorted_data[error_signal].abs()
 
-    # Create a figure
-    p = figure(x_axis_label='Arrival Time Difference (s)', y_axis_label='Prediction Error (s)')
+        # Calculate rolling average
+        sorted_data[f"{error_signal}_rolling_avg"] = sorted_data[error_signal].abs().rolling(window=rolling_window_size).mean()
 
-    # Finding the maximum absolute value for y-axis range
-    max_range = max(data['Error Signal Time A'].abs().max(), data['Error Signal Time B'].abs().max())
+        # Create a color mapper
+        color_mapper = LinearColorMapper(palette=palettes.Plasma[256], low=sorted_data[f"abs_{error_signal}"].min(), high=sorted_data[f"abs_{error_signal}"].max())
 
-    # Setting the y-axis range to be symmetric around zero
-    p.y_range = Range1d(-max_range, max_range)
+        # Create a figure
+        p = figure(x_axis_label='Arrival Time Difference (s)', y_axis_label=f'Prediction Error Signal {title} (s)')
 
-    # Adding lines to the plot
-    p.circle(data['Time Differnece'], data['Error Signal Time A'], legend_label="Error Signal Time A", color="blue")
-    p.circle(data['Time Differnece'], -data['Error Signal Time B'], legend_label="Error Signal Time B", color="red")  # Inverting B
+        # Finding the maximum absolute value for y-axis range
+        max_range = sorted_data[error_signal].max()
 
-    # Custom tick formatter to display absolute values
-    p.yaxis.formatter = CustomJSTickFormatter(code="""
-        return Math.abs(tick).toString();
-    """)
+        # Setting the y-axis range to be symmetric around zero
+        p.y_range = Range1d(-max_range, max_range)
 
-    # Set output file:
-    bk.output_file(f"difference_plot.html")
-    bk.save(p)
+        # Add circles with color mapped to absolute error
+        source = ColumnDataSource(sorted_data)
+        p.circle('Time Difference', error_signal, source=source, color={'field': f"abs_{error_signal}", 'transform': color_mapper}, line_color=None)
+
+        # Add rolling average line
+        df_nth = sorted_data.iloc[::rolling_window_size, :]
+        source = ColumnDataSource(df_nth)
+        p.line('Time Difference', f"{error_signal}_rolling_avg", source=source, line_width=2, color="red")
+
+        # Add a color bar
+        color_bar = ColorBar(color_mapper=color_mapper, label_standoff=12, location=(0,0), title=f"Absolute Error Signal {title} (s)")
+        p.add_layout(color_bar, 'right')
+
+        # Set output file and save
+        bk.output_file(f"{output_file_name}_difference_plot_{title}.html")
+        bk.save(p)
 
 def difference_plot_best(
         input_file_name : str = "./validation_results/crosswave_validation_scores_regression_best",
@@ -640,7 +750,6 @@ def difference_plot_best_difference_snr(
 
     data['H1_time_signal_a'] -= 60
     data['H1_time_signal_b'] -= 60 
-
     data['H1_time_signal_a_pred'] *= 4
     data['H1_time_signal_b_pred'] *= 4
 
@@ -670,19 +779,16 @@ def difference_plot_best_difference_snr(
 
 if __name__ == "__main__":
     
+    plot_classification_scores()
     plot_classification_scores_separation()
     plot_classification_scores_mass()
-    plot_classification_scores_ratio()
-    quit()
-    
+    plot_classification_scores_ratio()    
     plot_classification_efficiencies()
+
+    plot_regression_efficiencies()
     difference_plot()
     difference_plot_best()
     difference_plot_best_difference()
     difference_plot_best_difference_error()
     difference_plot_best_difference_snr()
-    plot_classification_scores()
     plot_regression_scores()
-
-
-
